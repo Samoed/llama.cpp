@@ -10,11 +10,11 @@ if TYPE_CHECKING:
 
 from .base import MmprojModel, ModelBase, gguf, logger
 
-from .qwen import Qwen3Model, Qwen3MoeModel
+from .qwen import Qwen3Model, Qwen3MoeModel, Qwen3_5TextModel
 from .qwenvl import Qwen25AudioModel
 
 
-@ModelBase.register("Qwen3VLForConditionalGeneration", "Qwen3VLMoeForConditionalGeneration", "Qwen3_5ForConditionalGeneration", "Qwen3_5MoeForConditionalGeneration", "OpenJevModel")
+@ModelBase.register("Qwen3VLForConditionalGeneration", "Qwen3VLMoeForConditionalGeneration", "Qwen3_5ForConditionalGeneration", "Qwen3_5Model", "Qwen3_5MoeForConditionalGeneration", "OpenJevModel")
 @ModelBase.example("Qwen/Qwen3-VL-4B-Instruct", "Qwen/Qwen3-VL-30B-A3B-Instruct", "Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-35B-A3B")
 class Qwen3VLVisionModel(MmprojModel):
     def __init__(self, *args, **kwargs):
@@ -143,6 +143,25 @@ class Qwen3VLVisionModel(MmprojModel):
             return
 
         yield from MmprojModel.modify_tensors(self, data_torch, name, bid)
+
+
+@ModelBase.register("Qwen3_5Model")
+class ColQwen3_5Model(Qwen3_5TextModel):
+    model_arch = gguf.MODEL_ARCH.QWEN35
+    no_mtp = True
+
+    def generate_extra_tensors(self) -> Iterable[tuple[str, Tensor]]:
+        from safetensors.torch import load_file
+
+        tensors_file = self.dir_model / "1_Dense" / "model.safetensors"
+        if not tensors_file.is_file():
+            return
+        weight = load_file(tensors_file)["linear.weight"]
+        if weight.ndim != 2 or weight.shape[1] != self.hparams["hidden_size"] or weight.shape[0] == 0:
+            raise ValueError(f"Invalid multi-vector projection shape: {tuple(weight.shape)}")
+        self.gguf_writer.add_embedding_length_out(weight.shape[0])
+        self.gguf_writer.add_pooling_type(gguf.PoolingType.NONE)
+        yield self.format_tensor_name(gguf.MODEL_TENSOR.CLS_OUT), weight.clone()
 
 
 @ModelBase.register("MiniCPMOCRForSequenceClassification")
